@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codebase Investigator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  #repo-form {
+    display: flex;
+    gap: 8px;
+    flex: 1;
+    max-width: 600px;
+  }
+
+  #repo-url {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 12px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  #repo-url:focus { border-color: var(--accent); }
+  #repo-url::placeholder { color: var(--muted); }
+
+  button {
+    background: var(--accent);
+    color: #0d1117;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #repo-badge {
+    display: none;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--muted);
+    gap: 6px;
+    align-items: center;
+  }
+  #repo-badge.visible { display: flex; }
+  #repo-badge strong { color: var(--text); }
+
+  /* ── Main layout ── */
+  main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Chat panel ── */
+  #chat-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    scroll-behavior: smooth;
+  }
+
+  /* Empty state */
+  #empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--muted);
+    text-align: center;
+    padding: 40px;
+  }
+  #empty-state .icon { font-size: 40px; }
+  #empty-state h2 { font-size: 18px; color: var(--text); }
+  #empty-state p { font-size: 13px; max-width: 400px; line-height: 1.6; }
+
+  .example-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 8px;
+  }
+  .chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); background: var(--surface); }
+
+  /* Messages */
+  .msg-user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: #0d1117;
+    border-radius: 12px 12px 2px 12px;
+    padding: 10px 16px;
+    font-size: 14px;
+    max-width: 70%;
+    line-height: 1.5;
+  }
+
+  .msg-assistant {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 900px;
+  }
+
+  .answer-body {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Citation highlighting */
+  .citation {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: rgba(88, 166, 255, 0.12);
+    border: 1px solid rgba(88, 166, 255, 0.3);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .citation:hover { background: rgba(88, 166, 255, 0.22); }
+  .citation.invalid {
+    background: rgba(248, 81, 73, 0.12);
+    border-color: rgba(248, 81, 73, 0.3);
+    color: var(--red);
+    text-decoration: line-through;
+  }
+
+  /* Audit panel */
+  .audit-toggle {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    width: fit-content;
+  }
+
+  .verdict-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .verdict-trustworthy { background: rgba(63, 185, 80, 0.15); color: var(--green); border: 1px solid rgba(63, 185, 80, 0.3); }
+  .verdict-caution     { background: rgba(210, 153, 34, 0.15); color: var(--yellow); border: 1px solid rgba(210, 153, 34, 0.3); }
+  .verdict-unreliable  { background: rgba(248, 81, 73, 0.15); color: var(--red); border: 1px solid rgba(248, 81, 73, 0.3); }
+
+  .audit-chevron {
+    font-size: 11px;
+    color: var(--muted);
+    transition: transform 0.2s;
+  }
+  .audit-chevron.open { transform: rotate(180deg); }
+
+  .audit-panel {
+    display: none;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .audit-panel.open { display: block; }
+
+  .audit-section {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .audit-section:last-child { border-bottom: none; }
+
+  .audit-section h4 {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .audit-summary {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .flag {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    font-size: 12.5px;
+    line-height: 1.5;
+    padding: 4px 0;
+  }
+  .flag-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex-shrink: 0;
+  }
+  .flag-error   .flag-dot { background: var(--red); }
+  .flag-warning .flag-dot { background: var(--yellow); }
+  .flag-info    .flag-dot { background: var(--accent); }
+
+  .citation-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+  .citation-status { font-size: 11px; padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+  .citation-valid   { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+  .citation-invalid { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+
+  .missing-item {
+    font-size: 12.5px;
+    color: var(--muted);
+    padding: 2px 0;
+    display: flex;
+    gap: 6px;
+  }
+  .missing-item::before { content: "→"; color: var(--border); }
+
+  /* Progress / thinking */
+  .thinking-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 4px 0;
+  }
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .tool-badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: var(--purple);
+  }
+
+  /* Input area */
+  #input-area {
+    flex-shrink: 0;
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+
+  #question-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 10px 14px;
+    font-size: 14px;
+    outline: none;
+    resize: none;
+    min-height: 42px;
+    max-height: 160px;
+    line-height: 1.5;
+    font-family: inherit;
+    transition: border-color 0.15s;
+  }
+  #question-input:focus { border-color: var(--accent); }
+  #question-input::placeholder { color: var(--muted); }
+
+  #send-btn {
+    height: 42px;
+    padding: 0 16px;
+    border-radius: 8px;
+  }
+
+  /* Turn counter */
+  .turn-label {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    margin-bottom: 6px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🔍 Codebase Investigator</h1>
+  <form id="repo-form">
+    <input id="repo-url" type="url" placeholder="https://github.com/owner/repo" autocomplete="off">
+    <button id="load-btn" type="submit">Load Repo</button>
+  </form>
+  <div id="repo-badge">
+    <span>📦</span>
+    <strong id="badge-name"></strong>
+    <span id="badge-meta"></span>
+  </div>
+</header>
+
+<main>
+  <div id="chat-panel">
+    <div id="messages">
+      <div id="empty-state">
+        <div class="icon">🔭</div>
+        <h2>Paste a GitHub URL to start</h2>
+        <p>The agent will investigate the codebase using tools, cite specific file:line ranges, and every answer is independently audited.</p>
+        <div class="example-chips">
+          <div class="chip" onclick="fillExample(this)">How does auth work here, and what would you change about it?</div>
+          <div class="chip" onclick="fillExample(this)">Is there dead code? What's safe to delete?</div>
+          <div class="chip" onclick="fillExample(this)">Walk me through what this service does. Skip the obvious.</div>
+          <div class="chip" onclick="fillExample(this)">Suggest a better way to handle errors in the API layer.</div>
+          <div class="chip" onclick="fillExample(this)">This signup flow feels off — walk me through it and flag anything risky.</div>
+          <div class="chip" onclick="fillExample(this)">Why is this function async? Does it need to be?</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="input-area">
+      <textarea id="question-input" placeholder="Ask anything about the codebase…" rows="1" disabled></textarea>
+      <button id="send-btn" disabled>Send</button>
+    </div>
+  </div>
+</main>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let sessionId = null;
+let streaming = false;
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const repoForm     = document.getElementById('repo-form');
+const repoUrl      = document.getElementById('repo-url');
+const loadBtn      = document.getElementById('load-btn');
+const repoBadge    = document.getElementById('repo-badge');
+const badgeName    = document.getElementById('badge-name');
+const badgeMeta    = document.getElementById('badge-meta');
+const messages     = document.getElementById('messages');
+const emptyState   = document.getElementById('empty-state');
+const questionInput = document.getElementById('question-input');
+const sendBtn      = document.getElementById('send-btn');
+
+// ── Repo loading ─────────────────────────────────────────────────────────────
+repoForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = repoUrl.value.trim();
+  if (!url) return;
+  loadBtn.disabled = true;
+  loadBtn.textContent = 'Loading…';
+  try {
+    const res = await fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ github_url: url }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      alert(`Error: ${err.detail}`);
+      return;
+    }
+    const data = await res.json();
+    sessionId = data.session_id;
+    const ri = data.repo_info;
+    badgeName.textContent = `${ri.owner}/${ri.repo}`;
+    badgeMeta.textContent = `${ri.branch} · ${ri.file_count} files${ri.language ? ' · ' + ri.language : ''}`;
+    repoBadge.classList.add('visible');
+    questionInput.disabled = false;
+    sendBtn.disabled = false;
+    questionInput.focus();
+    clearMessages();
+  } catch (err) {
+    alert(`Network error: ${err.message}`);
+  } finally {
+    loadBtn.disabled = false;
+    loadBtn.textContent = 'Load Repo';
+  }
+});
+
+// ── Send message ─────────────────────────────────────────────────────────────
+sendBtn.addEventListener('click', sendMessage);
+questionInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+questionInput.addEventListener('input', () => {
+  questionInput.style.height = 'auto';
+  questionInput.style.height = Math.min(questionInput.scrollHeight, 160) + 'px';
+});
+
+async function sendMessage() {
+  const msg = questionInput.value.trim();
+  if (!msg || !sessionId || streaming) return;
+
+  streaming = true;
+  questionInput.disabled = true;
+  sendBtn.disabled = true;
+  questionInput.value = '';
+  questionInput.style.height = 'auto';
+
+  // Hide empty state
+  if (emptyState) emptyState.remove();
+
+  // User bubble
+  appendUserMsg(msg);
+
+  // Assistant placeholder
+  const { container, progressEl, answerEl, auditContainer } = appendAssistantPlaceholder();
+
+  try {
+    const evtSource = await startStream(msg);
+    let answer = '';
+    let citationChecks = [];
+
+    evtSource.addEventListener('status', (e) => {
+      const d = JSON.parse(e.data);
+      setProgress(progressEl, d.message);
+    });
+
+    evtSource.addEventListener('tool_call', (e) => {
+      const d = JSON.parse(e.data);
+      addToolCall(progressEl, d.tool, d.input);
+    });
+
+    evtSource.addEventListener('tool_result', (e) => {
+      const d = JSON.parse(e.data);
+      updateLastToolCall(progressEl, d.summary);
+    });
+
+    evtSource.addEventListener('answer', (e) => {
+      const d = JSON.parse(e.data);
+      answer = d.text;
+      progressEl.style.display = 'none';
+      renderAnswer(answerEl, answer, []);
+    });
+
+    evtSource.addEventListener('citations', (e) => {
+      citationChecks = JSON.parse(e.data);
+      // Re-render with citation validity
+      renderAnswer(answerEl, answer, citationChecks);
+    });
+
+    evtSource.addEventListener('audit', (e) => {
+      const audit = JSON.parse(e.data);
+      renderAudit(auditContainer, audit, citationChecks);
+    });
+
+    evtSource.addEventListener('complete', (e) => {
+      evtSource.close();
+      streaming = false;
+      questionInput.disabled = false;
+      sendBtn.disabled = false;
+      questionInput.focus();
+      scrollBottom();
+    });
+
+    evtSource.addEventListener('error', (e) => {
+      evtSource.close();
+      progressEl.innerHTML = '<span style="color:var(--red)">Stream error. Check the server.</span>';
+      streaming = false;
+      questionInput.disabled = false;
+      sendBtn.disabled = false;
+    });
+
+  } catch (err) {
+    progressEl.innerHTML = `<span style="color:var(--red)">${err.message}</span>`;
+    streaming = false;
+    questionInput.disabled = false;
+    sendBtn.disabled = false;
+  }
+}
+
+async function startStream(message) {
+  const url = `/api/chat/stream`;
+  // Use EventSource via fetch (POST SSE using fetch + ReadableStream)
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, message }),
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err.detail || 'Request failed');
+  }
+  // Polyfill: wrap the response into a fake EventSource-like object
+  return new FetchSSE(response);
+}
+
+// ── FetchSSE polyfill ────────────────────────────────────────────────────────
+class FetchSSE extends EventTarget {
+  constructor(response) {
+    super();
+    this._listeners = {};
+    this._closed = false;
+    this._parse(response.body.getReader());
+  }
+
+  addEventListener(type, fn) {
+    if (!this._listeners[type]) this._listeners[type] = [];
+    this._listeners[type].push(fn);
+    super.addEventListener(type, fn);
+  }
+
+  close() { this._closed = true; }
+
+  async _parse(reader) {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (!this._closed) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+      for (const block of parts) {
+        const event = this._parseBlock(block);
+        if (event) {
+          const e = new MessageEvent(event.type, { data: event.data });
+          this.dispatchEvent(e);
+        }
+      }
+    }
+  }
+
+  _parseBlock(block) {
+    let type = 'message', data = '';
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event: ')) type = line.slice(7).trim();
+      else if (line.startsWith('data: ')) data = line.slice(6);
+    }
+    return data ? { type, data } : null;
+  }
+}
+
+// ── DOM helpers ───────────────────────────────────────────────────────────────
+function appendUserMsg(text) {
+  const el = document.createElement('div');
+  el.className = 'msg-user';
+  el.textContent = text;
+  messages.appendChild(el);
+  scrollBottom();
+}
+
+function appendAssistantPlaceholder() {
+  const container = document.createElement('div');
+  container.className = 'msg-assistant';
+
+  const progressEl = document.createElement('div');
+  progressEl.innerHTML = `<div class="thinking-row"><div class="spinner"></div><span>Connecting…</span></div>`;
+
+  const answerEl = document.createElement('div');
+  answerEl.className = 'answer-body';
+  answerEl.style.display = 'none';
+
+  const auditContainer = document.createElement('div');
+
+  container.appendChild(progressEl);
+  container.appendChild(answerEl);
+  container.appendChild(auditContainer);
+  messages.appendChild(container);
+  scrollBottom();
+  return { container, progressEl, answerEl, auditContainer };
+}
+
+function setProgress(el, message) {
+  el.innerHTML = `<div class="thinking-row"><div class="spinner"></div><span>${message}</span></div>`;
+}
+
+let toolCallCount = 0;
+function addToolCall(progressEl, tool, input) {
+  toolCallCount++;
+  const id = `tc-${toolCallCount}`;
+  const summary = formatToolInput(tool, input);
+  const row = document.createElement('div');
+  row.className = 'thinking-row';
+  row.id = id;
+  row.innerHTML = `<div class="spinner"></div><span class="tool-badge">${tool}</span><span style="color:var(--muted);font-size:12px">${escHtml(summary)}</span>`;
+  progressEl.appendChild(row);
+  progressEl.style.display = '';
+  scrollBottom();
+}
+
+function updateLastToolCall(progressEl, summary) {
+  const rows = progressEl.querySelectorAll('.thinking-row');
+  const last = rows[rows.length - 1];
+  if (last) {
+    last.querySelector('.spinner').style.borderTopColor = 'var(--green)';
+    last.querySelector('.spinner').style.animation = 'none';
+    const badge = last.querySelector('.tool-badge');
+    if (badge) badge.style.color = 'var(--green)';
+    const textEl = last.querySelector('span:last-child');
+    if (textEl) textEl.textContent = summary;
+  }
+}
+
+function formatToolInput(tool, input) {
+  if (tool === 'read_file') return input.path + (input.start_line ? `:L${input.start_line}${input.end_line ? '-L' + input.end_line : ''}` : '');
+  if (tool === 'search_codebase') return `"${input.query}"${input.file_pattern ? ' in ' + input.file_pattern : ''}`;
+  if (tool === 'list_directory') return input.path || '/';
+  if (tool === 'find_files') return input.pattern;
+  return JSON.stringify(input).slice(0, 60);
+}
+
+function renderAnswer(el, text, citationChecks) {
+  el.style.display = '';
+  // Build validity map
+  const validityMap = {};
+  for (const c of citationChecks) {
+    validityMap[c.raw] = c.valid;
+  }
+  // Replace citations with spans
+  const escaped = escHtml(text);
+  const cited = escaped.replace(
+    /\[([^\]]+?):L(\d+)(?:-L(\d+))?\]/g,
+    (match) => {
+      const isValid = validityMap[match];
+      const cls = isValid === false ? 'citation invalid' : 'citation';
+      const title = isValid === false ? 'Invalid citation — file or line not found' : 'Verified citation';
+      return `<span class="${cls}" title="${title}">${escHtml(match)}</span>`;
+    }
+  );
+  el.innerHTML = cited;
+  scrollBottom();
+}
+
+function renderAudit(container, audit, citationChecks) {
+  const verdictClass = `verdict-${audit.verdict}`;
+  const verdictLabel = audit.verdict.toUpperCase();
+  const verdictIcon = audit.verdict === 'trustworthy' ? '✓' : audit.verdict === 'caution' ? '⚠' : '✗';
+
+  let flagsHtml = '';
+  if (audit.flags && audit.flags.length) {
+    flagsHtml = `
+      <div class="audit-section">
+        <h4>Flags</h4>
+        ${audit.flags.map(f => `
+          <div class="flag flag-${f.severity}">
+            <div class="flag-dot"></div>
+            <span>${escHtml(f.text)}</span>
+          </div>
+        `).join('')}
+      </div>`;
+  }
+
+  let contradictionsHtml = '';
+  if (audit.contradictions && audit.contradictions.length) {
+    contradictionsHtml = `
+      <div class="audit-section">
+        <h4>Contradictions with prior turns</h4>
+        ${audit.contradictions.map(c => `
+          <div class="flag flag-error">
+            <div class="flag-dot"></div>
+            <span>${escHtml(c)}</span>
+          </div>
+        `).join('')}
+      </div>`;
+  }
+
+  let citationsHtml = '';
+  if (citationChecks && citationChecks.length) {
+    citationsHtml = `
+      <div class="audit-section">
+        <h4>Citations (${citationChecks.filter(c=>c.valid).length}/${citationChecks.length} valid)</h4>
+        ${citationChecks.map(c => `
+          <div class="citation-row">
+            <span class="citation-status ${c.valid ? 'citation-valid' : 'citation-invalid'}">${c.valid ? '✓' : '✗'}</span>
+            <span>${escHtml(c.raw)}</span>
+            ${!c.valid ? `<span style="color:var(--red);font-size:11px">${escHtml(c.reason||'')}</span>` : ''}
+          </div>
+        `).join('')}
+      </div>`;
+  }
+
+  let missingHtml = '';
+  if (audit.missing_context && audit.missing_context.length) {
+    missingHtml = `
+      <div class="audit-section">
+        <h4>Missing investigation</h4>
+        ${audit.missing_context.map(m => `<div class="missing-item">${escHtml(m)}</div>`).join('')}
+      </div>`;
+  }
+
+  const auditId = 'audit-' + Math.random().toString(36).slice(2);
+  container.innerHTML = `
+    <div class="audit-toggle" onclick="toggleAudit('${auditId}', this)">
+      <span class="verdict-badge ${verdictClass}">${verdictIcon} ${verdictLabel}</span>
+      <span style="font-size:12px;color:var(--muted)">${escHtml(audit.summary)}</span>
+      <span class="audit-chevron">▼</span>
+    </div>
+    <div id="${auditId}" class="audit-panel">
+      <div class="audit-section">
+        <h4>Summary</h4>
+        <div class="audit-summary">${escHtml(audit.summary)}</div>
+      </div>
+      ${flagsHtml}
+      ${contradictionsHtml}
+      ${citationsHtml}
+      ${missingHtml}
+    </div>
+  `;
+  scrollBottom();
+}
+
+function toggleAudit(id, toggleEl) {
+  const panel = document.getElementById(id);
+  const chevron = toggleEl.querySelector('.audit-chevron');
+  panel.classList.toggle('open');
+  chevron.classList.toggle('open');
+}
+
+function clearMessages() {
+  messages.innerHTML = '';
+  toolCallCount = 0;
+}
+
+function scrollBottom() {
+  requestAnimationFrame(() => {
+    messages.scrollTop = messages.scrollHeight;
+  });
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function fillExample(chip) {
+  if (!sessionId) { alert('Load a repo first.'); return; }
+  questionInput.value = chip.textContent;
+  questionInput.dispatchEvent(new Event('input'));
+  questionInput.focus();
+}
+</script>
+</body>
+</html>
